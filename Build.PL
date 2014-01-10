@@ -22,5 +22,7 @@ my $builder = Module::Build->new(
     add_to_cleanup     => [ 'Test-WWW-Mechanize-MultiMech-*' ],
     create_makefile_pl => 'traditional',
 );
-
+if ( $ENV{RELEASE_TESTING} ) {
+    system('pod2text lib/Test/WWW/Mechanize/MultiMech.pm > README');
+}
 $builder->create_build_script();
