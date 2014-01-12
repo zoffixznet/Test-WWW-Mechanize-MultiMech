@@ -5,7 +5,7 @@ use strict;
 use warnings FATAL => 'all';
 our $VERSION = '1.001';
 use Test::WWW::Mechanize;
-use Test::Builder qw//;
+use Test::Builder  qw//;
 use Carp qw/croak/;
 
 sub _diag {
