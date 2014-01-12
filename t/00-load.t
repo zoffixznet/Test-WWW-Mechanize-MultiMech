@@ -4,9 +4,13 @@ use strict;
 use warnings FATAL => 'all';
 use Test::More;
 
-plan tests => 1;
+plan tests => 4;
 
 BEGIN {
+    use_ok('Carp');
+    use_ok('Test::WWW::Mechanize');
+    use_ok('Test::Builder');
+
     use_ok( 'Test::WWW::Mechanize::MultiMech' ) || print "Bail out!\n";
 }
 

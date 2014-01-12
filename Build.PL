@@ -16,8 +16,10 @@ my $builder = Module::Build->new(
         'Test::More' => 0,
     },
     requires => {
-        #'ABC'               => 1.6,
-        #'Foo::Bar::Module' => 5.0401,
+        'Carp'                 => 1.26,
+        'Test::WWW::Mechanize' => 1.44,
+        'Test::Builder'        => 0.99,
+        'perl' => '5.006',
     },
     add_to_cleanup     => [ 'Test-WWW-Mechanize-MultiMech-*' ],
     create_makefile_pl => 'traditional',

@@ -39,3 +39,7 @@ $mech         ->text_contains('Your user information'  );
 $mech->admin  ->text_contains('You are an admin user!' );
 $mech->super  ->text_contains('You are a super user!'  );
 $mech->clerk  ->text_contains('You are a clerk user!'  );
+
+
+
+
