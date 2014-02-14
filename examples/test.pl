@@ -2,6 +2,9 @@
 
 use strict;
 use warnings;
+
+# VERSION
+
 use lib qw(lib ../lib);
 use Test::WWW::Mechanize::MultiMech;
 

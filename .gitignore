@@ -1,1 +1,3 @@
-Test-WWW-Mechanize-MultiMech-*.tar.gz
+Test-WWW-Mechanize-MultiMech-*
+.build
+temp

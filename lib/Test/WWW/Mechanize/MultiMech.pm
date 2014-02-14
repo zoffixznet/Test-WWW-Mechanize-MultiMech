@@ -3,9 +3,11 @@ package Test::WWW::Mechanize::MultiMech;
 use 5.006;
 use strict;
 use warnings FATAL => 'all';
-our $VERSION = '1.001';
+
+# VERSION
+
 use Test::WWW::Mechanize;
-use Test::Builder  qw//;
+use Test::Builder qw//;
 use Carp qw/croak/;
 
 sub _diag {
@@ -46,12 +48,14 @@ sub new {
 
 sub _mech {
     my $self = shift;
-    return $self->{USERS}{ $self->{USERS_ORDER}[0] }{mech};
-}
+    my ( $any_user ) = grep !$self->{IGNORED_USERS}{$_},
+        @{$self->{USERS_ORDER}};
 
-sub _all_mechs {
-    my $self = shift;
-    return map $_->{mech}, @{ $self->{USERS} };
+    $any_user
+        or croak q{Didn't find any available users when getting any}
+            . q{ user's mech object.};
+
+    return $self->{USERS}{ $any_user }{mech};
 }
 
 sub login {
@@ -68,8 +72,9 @@ sub login {
     }
 
     my $users = $self->{USERS};
-    my $c = 0;
-    for my $alias ( @{$self->{USERS_ORDER}} ) {
+    for my $alias (
+        grep !$self->{IGNORED_USERS}{$_}, @{$self->{USERS_ORDER}}
+    ) {
         my $mech = $users->{ $alias }{mech};
 
         $mech->get_ok(
@@ -98,6 +103,8 @@ sub login {
 sub AUTOLOAD {
     my ( $self, @args ) = @_;
 
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
     our $AUTOLOAD;
     my $method = (split /::/, $AUTOLOAD)[-1];
     return if $method eq 'DESTROY';
@@ -106,8 +113,9 @@ sub AUTOLOAD {
         return $self->_call_mech_method_on_each_user( $method, \@args );
     }
     elsif ( grep $_ eq $method, @{ $self->{USERS_ORDER} } ) {
-        _diag "[$method]-only call";
-        return $self->{USERS}{ $method }{mech};
+        my $alias = $method;
+        _diag "[$alias]-only call";
+        return $self->{USERS}{ $alias }{mech};
     }
     elsif ( $method eq 'any' ) {
         _diag "[any] call";
@@ -121,8 +129,12 @@ sub AUTOLOAD {
 sub _call_mech_method_on_each_user {
     my ( $self, $method, $args ) = @_;
 
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+
     my %returns;
-    for my $alias ( @{$self->{USERS_ORDER}} ) {
+    for my $alias (
+        grep !$self->{IGNORED_USERS}{$_}, @{$self->{USERS_ORDER}}
+    ) {
         _diag("\n[$alias] Calling ->$method()\n");
         $returns{ $alias }
         = $self->{USERS}{ $alias }{mech}->$method( @$args );
@@ -133,35 +145,35 @@ sub _call_mech_method_on_each_user {
 }
 
 sub remove_user {
-    my ( $self, $login ) = @_;
+    my ( $self, $alias ) = @_;
 
-    return unless exists $self->{USERS}{ $login };
+    return unless exists $self->{USERS}{ $alias };
 
     @{ $self->{USERS_ORDER} }
-    = grep $_ ne $login, @{ $self->{USERS_ORDER}  };
+    = grep $_ ne $alias, @{ $self->{USERS_ORDER}  };
 
-    my $args = delete $self->{USERS}{ $login };
+    my $args = delete $self->{USERS}{ $alias };
 
     croak 'You must have at least one user and you '
         . 'just removed the last one'
         unless @{ $self->{USERS_ORDER}  };
 
-    return ( $login, $args );
+    return ( $alias, $args );
 }
 
 sub add_user {
-    my ( $self, $login, $args ) = @_;
+    my ( $self, $alias, $args ) = @_;
 
     my $mech = Test::WWW::Mechanize->new( %{ $self->{MECH_ARGS} } );
 
-    $self->{USERS}{ $login } = {
+    $self->{USERS}{ $alias } = {
         %{ $args || {} },
         mech => $mech,
     };
 
     @{ $self->{USERS_ORDER} } = (
-        ( grep $_ ne $login, @{ $self->{USERS_ORDER} } ),
-        $login,
+        ( grep $_ ne $alias, @{ $self->{USERS_ORDER} } ),
+        $alias,
     );
 
     return;
@@ -169,7 +181,28 @@ sub add_user {
 
 sub all_users {
     my $self = shift;
-    return @{ $self->{USERS_ORDER} };
+    my $is_include_ignored = shift;
+    return $is_include_ignored
+        ? @{ $self->{USERS_ORDER} }
+        : grep !$self->{IGNORED_USERS}{ $_ }, @{ $self->{USERS_ORDER} };
+}
+
+sub ignore_user {
+    my ( $self, $alias ) = @_;
+
+    return unless exists $self->{USERS}{ $alias };
+
+    $self->{IGNORED_USERS}{ $alias } = 1;
+    if ( keys %{$self->{IGNORED_USERS}} eq @{ $self->{USERS_ORDER} } ){
+        croak q{You ignored all your users. Can't function without at least
+            one active user};
+    }
+}
+
+sub unignore_user {
+    my ( $self, $alias ) = @_;
+
+    delete $self->{IGNORED_USERS}{ $alias };
 }
 
 q|
@@ -179,6 +212,8 @@ Why programmers like UNIX: unzip, strip, touch, finger, grep, mount, fsck,
 __END__
 
 =encoding utf8
+
+=for stopwords Ofttimes Unignoring admin admins app mech unignore unignored
 
 =head1 NAME
 
@@ -227,6 +262,10 @@ Test::WWW::Mechanize::MultiMech - coordinate multi-object mech tests for multi-u
     $mech->super  ->text_contains('You are a super user!'  );  # super user only
     $mech->clerk  ->text_contains('You are a clerk user!'  );  # clerk user only
 
+    # nothing stops you from using variables as method calls
+    $mech->$_->get_ok('/foobar')
+        for qw/admin shipper/;
+
     # call ->res once on "any one" mech object
     print $mech->any->res->decoded_content;
 
@@ -235,6 +274,11 @@ Test::WWW::Mechanize::MultiMech - coordinate multi-object mech tests for multi-u
 
     # call ->uri method on every object and inspect value returned for 'any one' user
     print $mech->uri->{any}->query;
+
+    # ignore user 'super' when making all-user method calls
+    $mech->ignore('super');
+    $mech->get_ok('/not-super'); # this was not called for user 'super'
+    $mech->unignore('super');
 
 =head1 DESCRIPTION
 
@@ -251,8 +295,8 @@ Note that this module does not fork out or do any other business to
 make all the mech objects execute their methods B<simultaneously>. The
 methods that are called to be executed on all mech objects will be called
 in the order that you specify the C<users> to the C<< ->new >> method.
-Which user you get when using C<any>—either as a method or the key
-in return value hashref—is not specified; it is what it says on the tin,
+Which user you get when using C<any>, either as a method or the key
+in return value hashref, is not specified; it is what it says on the tin,
 "any" user.
 
 =head1 GENERAL IDEA BEHIND THE INTERFACE OF THIS MODULE
@@ -290,6 +334,10 @@ and sticking with it. E.g.:
     # call ->uri on every mech object and get the result of any one of them
     $mech->uri->{any}->query;
 
+B<Note:> if you C<< ->ignore() >> a user, they won't be considered
+as a candidate for C<< $mech->any >> and they won't be as a key in the
+return value of all-user method calls.
+
 =head1 METHODS
 
 =head2 C<new>
@@ -311,7 +359,7 @@ You B<must> specify at least one user using the C<users> key, whose
 value is an arrayref of users. Everything else will be B<passed> to
 the C<< ->new >> method of L<Test::WWW::Mechanize>. The users arrayref
 is specified as a list of key/value pairs, where keys are user aliases
-and values are—possibly empty—hashrefs of parameters. The aliases will be
+and values are, possibly empty, hashrefs of parameters. The aliases will be
 used as method calls to call methods on mech object of individual
 users (see L<GENERAL IDEA BEHIND THE INTERFACE OF THIS MODULE>
 section above), so ensure your user aliases do not conflict with mech
@@ -370,7 +418,7 @@ method of L<Test::WWW::Mechanize>.
 The C<fields> argument, if specified, can contain any field name
 whose value is C<\'LOGIN'> or C<\'PASS'> (note the reference
 operator C<\>). If such fields are specified, their values will be
-substituded with the login/password of each user individually.
+substituted with the login/password of each user individually.
 
 =head2 C<add_user>
 
@@ -383,10 +431,10 @@ substituded with the login/password of each user individually.
     );
 
 Adds new mech object to the bundle. This can be useful when you
-want to do a quick test on a page with an unpriveleged user, whom
+want to do a quick test on a page with an unprivileged user, whom
 you dump with a C<< ->remove_user >> method.
 B<Takes> a user alias, optionally followed by user args hashref.
-See C<< ->new() >> method for passible keys/values in the user args
+See C<< ->new() >> method for possible keys/values in the user args
 hashref. Calling with a user alias alone is equivalent to calling with
 an empty user args hashref.
 
@@ -421,86 +469,97 @@ L<croak()|https://metacpan.org/pod/Carp>.
         print "I'm testing user $_\n";
     }
 
-Takes no arguments. Returns a list of user aliases currently used by
+    # printing all users, even ignored ones
+    for ( $mech->all_users(1) ) {
+        print "I'm testing user $_\n";
+    }
+
+Returns a list of user aliases currently used by
 MultiMech, in the same order in which they are called in
-all-object method calls.
+all-object method calls. Takes one optional true/value argument that
+specifies whether to include ignored users (see C<< ->ignore_user() >>
+method below). If set to a true value, ignored users will be included.
 
-=head1 AUTHOR
+=head2 C<ignore_user>
 
-Zoffix Znet, C<< <zoffix at cpan.org> >>
+    $mech->ignore_user('user1');
+
+    # This will NOT be called on user 'user1':
+    $mech->get_ok('/foo');
+
+Makes the MultiMech ignore a particular user when making all-user
+method calls. Ignored users won't be considered when using
+C<< $mech->any >> calls, and won't be present in the return value
+hashref of all-user method calls.
+
+Takes one argument, which is the alias of a user to ignore.
+Ignoring an already-ignored user is perfectly fine and has no ill effects.
+The method does not return anything meaningful.
+
+You can NOT ignore all of your users; at least one user must be
+unignored at all times. The module will
+L<croak()|https://metacpan.org/pod/Carp> if you attempt to ignore
+the last available user.
+
+B<NOTE:> ignored users are simply excluded from the all-user method calls.
+It is still perfectly valid to call single-user method calls on
+ignored users (e.g. C<< $mech->ignoreduser->get_ok('/foo') >>)
+
+=head2 C<unignore_user>
+
+    # This will NOT be called on ignored user 'user1':
+    $mech->get_ok('/foo');
+    $mech->unignore_user('user1');
+
+    # User 'user1' is now back in; this method will be called for him now
+    $mech->get_ok('/foo');
+
+Undoes what C<< ->ignore_user() >> does (removes an ignored user
+from the ignore list). Takes one argument, which is the alias of a user
+to unignore. Unignoring a non-ignored user is fine and has no ill effects.
+Does not return any meaningful value.
+
+=head1 CAVEATS
+
+What sucks about this module is the output is rather ugly and too
+verbose. I'm open to suggestions on how to make it better looking, while
+retaining information on which 'user' is doing what.
+
+=head1 REPOSITORY
+
+=for pod_spiffy start github section
+
+Fork this module on GitHub:
+L<https://github.com/zoffixznet/Test-WWW-Mechanize-MultiMech>
+
+=for pod_spiffy end github section
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-test-www-mechanize-multimech at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Test-WWW-Mechanize-MultiMech>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+=for pod_spiffy start bugs section
 
-=head1 SUPPORT
+To report bugs or request features, please use
+L<https://github.com/zoffixznet/Test-WWW-Mechanize-MultiMech/issues>
 
-You can find documentation for this module with the perldoc command.
+If you can't access GitHub, you can email your request
+to C<bug-Test-WWW-Mechanize-MultiMech at rt.cpan.org>
 
-    perldoc Test::WWW::Mechanize::MultiMech
+=for pod_spiffy end bugs section
 
-You can also look for information at:
+=head1 AUTHOR
 
-=over 4
+=for pod_spiffy start author section
 
-=item * RT: CPAN's request tracker (report bugs here)
+=for pod_spiffy author ZOFFIX
 
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Test-WWW-Mechanize-MultiMech>
+=for text Zoffix Znet <zoffix at cpan.org>
 
-=item * AnnoCPAN: Annotated CPAN documentation
+=for pod_spiffy end author section
 
-L<http://annocpan.org/dist/Test-WWW-Mechanize-MultiMech>
+=head1 LICENSE
 
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Test-WWW-Mechanize-MultiMech>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/Test-WWW-Mechanize-MultiMech/>
-
-=back
-
-=head1 LICENSE AND COPYRIGHT
-
-Copyright 2014 Zoffix Znet.
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of the the Artistic License (2.0). You may obtain a
-copy of the full license at:
-
-L<http://www.perlfoundation.org/artistic_license_2_0>
-
-Any use, modification, and distribution of the Standard or Modified
-Versions is governed by this Artistic License. By using, modifying or
-distributing the Package, you accept this license. Do not use, modify,
-or distribute the Package, if you do not accept this license.
-
-If your Modified Version has been derived from a Modified Version made
-by someone other than you, you are nevertheless required to ensure that
-your Modified Version complies with the requirements of this license.
-
-This license does not grant you the right to use any trademark, service
-mark, tradename, or logo of the Copyright Holder.
-
-This license includes the non-exclusive, worldwide, free-of-charge
-patent license to make, have made, use, offer to sell, sell, import and
-otherwise transfer the Package with respect to any patent claims
-licensable by the Copyright Holder that are necessarily infringed by the
-Package. If you institute patent litigation (including a cross-claim or
-counterclaim) against any party alleging that the Package constitutes
-direct or contributory patent infringement, then this Artistic License
-to you shall terminate on the date that such litigation is filed.
-
-Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER
-AND CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES.
-THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY
-YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR
-CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR
-CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE,
-EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+You can use and distribute this module under the same terms as Perl itself.
+See the C<LICENSE> file included in this distribution for complete
+details.
 
 =cut
